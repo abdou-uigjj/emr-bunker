@@ -1,0 +1,59 @@
+# deliberately BAD manifests - CI feeds these to conftest and REQUIRES
+# the policies to reject them. a policy that passes everything guards
+# nothing.
+#
+# 1. privileged, root, writable rootfs, latest tag
+apiVersion: v1
+kind: Pod
+metadata:
+  name: bad-pod
+  namespace: emr-bunker
+spec:
+  containers:
+    - name: openemr
+      image: openemr/openemr:latest
+      securityContext:
+        privileged: true
+---
+# 2. public door
+apiVersion: v1
+kind: Service
+metadata:
+  name: bad-service
+  namespace: emr-bunker
+spec:
+  type: NodePort
+  selector:
+    app: openemr
+  ports:
+    - port: 80
+      targetPort: 80
+---
+# 3. openemr without the canary sidecar
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: bad-openemr
+  namespace: emr-bunker
+  labels:
+    app: openemr
+spec:
+  selector:
+    matchLabels:
+      app: openemr
+  template:
+    metadata:
+      labels:
+        app: openemr
+    spec:
+      containers:
+        - name: openemr
+          image: openemr/openemr:7.0.2
+          securityContext:
+            runAsNonRoot: true
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop:
+                - ALL
+            seccompProfile:
+              type: RuntimeDefault
