@@ -1,0 +1,12 @@
+# copy to terraform.tfvars and fill in
+clinic_name = "rural-clinic"
+region      = "eu-west-3"
+oncall_email = "oncall@example.org"
+
+# narrow this to the bastion/admin range - never the internet
+admin_cidr = "10.99.0.0/16"
+
+db_instance_class       = "db.t4g.medium"
+backup_retention_days   = 14
+vault_min_retention_days = 90
+guardduty_min_severity  = 7
