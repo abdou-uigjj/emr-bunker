@@ -1,0 +1,174 @@
+# OpenEMR with the canary sidecar welded on.
+#
+# The canary polls decoy patient rows and honeypot documents inside the
+# shared volumes; any drift fires the signal that runs the response
+# playbook. The pod keeps emptyDir for the sidecar's signal file, but
+# every real clinical path is the encrypted RDS volume behind the
+# bunker-mysql service.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: openemr
+  namespace: emr-bunker
+  labels:
+    app: openemr
+spec:
+  replicas: 2
+  strategy:
+    type: RollingUpdate
+  selector:
+    matchLabels:
+      app: openemr
+  template:
+    metadata:
+      labels:
+        app: openemr
+    spec:
+      serviceAccountName: openemr
+      automountServiceAccountToken: false
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 10001
+        fsGroup: 20001
+      initContainers:
+        - name: canary-installer
+          image: python:3.12.7-slim
+          command:
+            - sh
+            - -c
+            - cp /canary-src/*.py /canary/ && chmod 0440 /canary/*
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop:
+                - ALL
+          volumeMounts:
+            - name: canary-src
+              mountPath: /canary-src
+            - name: canary-bin
+              mountPath: /canary
+      containers:
+        - name: openemr
+          image: openemr/openemr:7.0.2
+          imagePullPolicy: IfNotPresent
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop:
+                - ALL
+            seccompProfile:
+              type: RuntimeDefault
+          env:
+            - name: MYSQL_HOST
+              value: bunker-mysql
+            - name: MYSQL_ROOT_PASS
+              valueFrom:
+                secretKeyRef:
+                  name: openemr-db
+                  key: password
+          resources:
+            requests:
+              cpu: 250m
+              memory: 512Mi
+            limits:
+              cpu: "1"
+              memory: 1Gi
+          volumeMounts:
+            - name: documents
+              mountPath: /var/lib/openemr/documents
+            - name: tmp
+              mountPath: /tmp
+            - name: var-www
+              mountPath: /var/www/localhost/htdocs/openemr/sites
+        - name: canary
+          image: python:3.12.7-slim
+          command:
+            - python3
+            - /canary/canary_main.py
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            runAsNonRoot: true
+            capabilities:
+              drop:
+                - ALL
+            seccompProfile:
+              type: RuntimeDefault
+          env:
+            - name: EMR_BUNKER_STORE
+              value: /etc/emr-bunker/store.json
+            - name: EMR_BUNKER_INTERVAL
+              value: "5"
+            - name: EMR_BUNKER_SIGNAL
+              value: /canary-run/signal.json
+          resources:
+            requests:
+              cpu: 10m
+              memory: 32Mi
+            limits:
+              cpu: 100m
+              memory: 64Mi
+          volumeMounts:
+            - name: canary-bin
+              mountPath: /canary
+              readOnly: true
+            - name: canary-run
+              mountPath: /canary-run
+            - name: documents
+              mountPath: /var/lib/openemr/documents
+              readOnly: true
+            - name: canary-config
+              mountPath: /etc/emr-bunker
+              readOnly: true
+      volumes:
+        - name: canary-src
+          configMap:
+            name: canary-code
+        - name: canary-bin
+          emptyDir: {}
+        - name: canary-run
+          emptyDir: {}
+        - name: canary-config
+          configMap:
+            name: canary-config
+        - name: documents
+          emptyDir:
+            sizeLimit: 2Gi
+        - name: tmp
+          emptyDir: {}
+        - name: var-www
+          emptyDir: {}
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: openemr
+  namespace: emr-bunker
+automountServiceAccountToken: false
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: bunker-mysql
+  namespace: emr-bunker
+spec:
+  type: ClusterIP
+  selector:
+    app: bunker-mysql
+  ports:
+    - port: 3306
+      targetPort: 3306
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: openemr
+  namespace: emr-bunker
+spec:
+  type: ClusterIP
+  selector:
+    app: openemr
+  ports:
+    - port: 80
+      targetPort: 80

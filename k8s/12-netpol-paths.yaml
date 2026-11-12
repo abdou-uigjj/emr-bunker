@@ -1,0 +1,41 @@
+# the only door: openemr -> bunker-mysql. everything else stays denied
+# by 10-netpol-default-deny.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: allow-openemr-to-db
+  namespace: emr-bunker
+spec:
+  podSelector:
+    matchLabels:
+      app: bunker-mysql
+  policyTypes:
+    - Ingress
+  ingress:
+    - from:
+        - podSelector:
+            matchLabels:
+              app: openemr
+      ports:
+        - protocol: TCP
+          port: 3306
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: allow-openemr-egress-db
+  namespace: emr-bunker
+spec:
+  podSelector:
+    matchLabels:
+      app: openemr
+  policyTypes:
+    - Egress
+  egress:
+    - to:
+        - podSelector:
+            matchLabels:
+              app: bunker-mysql
+      ports:
+        - protocol: TCP
+          port: 3306

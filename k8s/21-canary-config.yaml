@@ -1,0 +1,40 @@
+# the canary sidecar's store config and entrypoint, shipped as config
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: canary-config
+  namespace: emr-bunker
+data:
+  store.json: |-
+    {
+      "kind": "files",
+      "directory": "/var/lib/openemr/documents"
+    }
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: canary-code
+  namespace: emr-bunker
+data:
+  canary_main.py: |-
+    """Sidecar entrypoint: poll decoys, write the signal file.
+
+    The signal file is the handoff point - a small sidecar job (or the
+    response Lambda via webhook) watches it and runs the playbook.
+    """
+    import json
+    import os
+    import sys
+    import time
+
+    sys.path.insert(0, "/canary")
+
+    from agent import CanaryAgent
+    from stores import _store_from_env
+
+    store = _store_from_env(os.environ["EMR_BUNKER_STORE"])
+    interval = float(os.environ.get("EMR_BUNKER_INTERVAL", "5"))
+    sink = os.environ.get("EMR_BUNKER_SIGNAL", "signal.json")
+    agent = CanaryAgent(store, interval=interval, signal_sink=sink)
+    agent.run()
